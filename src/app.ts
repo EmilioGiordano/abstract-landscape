@@ -70,7 +70,16 @@ export class App implements CaptureTarget {
 
     this.renderer = new Renderer(this.canvas, { preserveDrawingBuffer: this.fixedOutput, prepass: options.prepass });
     this.timer = new GpuTimer(this.renderer.gl);
-    this.director = new Director(this.settings, this.presets, (change) => this.applyScene(change), options.still);
+    this.director = new Director(
+      this.settings,
+      this.presets,
+      {
+        prepare: (change) => this.renderer.request({ ...this.settings, ...change.scene }),
+        isReady: (change) => this.pipelineReady(change),
+        apply: (change) => this.applyScene(change),
+      },
+      options.still,
+    );
     this.hint = new Hint(elements.hint, options.interfaceVisible);
     this.panel = new Panel(elements.panel, this.settings, this.presets, {
       changeParam: (key, value) => this.changeParam(key, value),
@@ -212,6 +221,14 @@ export class App implements CaptureTarget {
     document.title = 'ERROR';
   }
 
+  private pipelineReady(change: SceneChange): boolean {
+    try {
+      return this.renderer.isReady({ ...this.settings, ...change.scene });
+    } catch {
+      return true;
+    }
+  }
+
   private applyScene(change: SceneChange): void {
     Object.assign(this.settings, change.scene);
     this.presets.active = change.presetName;
@@ -227,6 +244,10 @@ export class App implements CaptureTarget {
   }
 
   private changeParam(key: ParamKey, value: number, syncPanel = false): void {
+    if (SHADER_KEYS.includes(key)) {
+      this.director.goScene({ [key]: value });
+      return;
+    }
     this.settings[key] = value;
     saveSettings(this.store, this.settings);
     const isSceneKey = !SYSTEM_KEYS.includes(key);
@@ -234,7 +255,6 @@ export class App implements CaptureTarget {
       this.presets.active = '';
       this.panel.syncPresets();
     }
-    if (SHADER_KEYS.includes(key) && !this.compileShaders()) return;
     if (key === 'auto' || PARAMS[key].kind === 'choice') this.director.restartTimer();
     if (isSceneKey && PARAMS[key].kind === 'choice') this.hint.show(describeScene(this.settings, this.presets.active));
     if (syncPanel) this.panel.sync();

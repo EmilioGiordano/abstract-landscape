@@ -8,8 +8,14 @@ export interface SceneChange {
   presetName: string;
 }
 
-const FADE_OUT_SECONDS = 0.9;
-const FADE_IN_SECONDS = 1.3;
+export interface SceneHooks {
+  prepare(change: SceneChange): void;
+  isReady(change: SceneChange): boolean;
+  apply(change: SceneChange): void;
+}
+
+const FADE_OUT_SECONDS = 0.35;
+const FADE_IN_SECONDS = 0.6;
 const PRESET_CYCLE = cycleIndex('presets');
 
 export class Director {
@@ -21,12 +27,16 @@ export class Director {
   constructor(
     private readonly settings: Settings,
     private readonly presets: PresetLibrary,
-    private readonly apply: (change: SceneChange) => void,
+    private readonly hooks: SceneHooks,
     private readonly instant: boolean,
   ) {}
 
   goRandom(): void {
     this.queue({ scene: randomScene(this.settings), presetName: '' });
+  }
+
+  goScene(scene: Partial<Settings>): void {
+    this.queue({ scene, presetName: '' });
   }
 
   goPreset(name: string): void {
@@ -52,9 +62,11 @@ export class Director {
       this.fade -= seconds / FADE_OUT_SECONDS;
       if (this.fade <= 0) {
         this.fade = 0;
-        const change = this.pending;
-        this.pending = null;
-        this.apply(change);
+        if (this.hooks.isReady(this.pending)) {
+          const change = this.pending;
+          this.pending = null;
+          this.hooks.apply(change);
+        }
       }
     } else if (this.fade < 1) {
       this.fade = Math.min(1, this.fade + seconds / FADE_IN_SECONDS);
@@ -64,7 +76,8 @@ export class Director {
   private queue(change: SceneChange): void {
     if (this.pending) return;
     this.sinceChange = 0;
-    if (this.instant) this.apply(change);
+    this.hooks.prepare(change);
+    if (this.instant) this.hooks.apply(change);
     else this.pending = change;
   }
 }
