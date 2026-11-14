@@ -2,43 +2,62 @@ export class ShaderError extends Error {}
 
 type GL = WebGL2RenderingContext;
 
-const compile = (gl: GL, type: number, source: string): WebGLShader => {
+export interface ParallelCompile {
+  readonly COMPLETION_STATUS_KHR: number;
+}
+
+const submit = (gl: GL, type: number, source: string): WebGLShader => {
   const shader = gl.createShader(type);
   if (!shader) throw new ShaderError('Unable to create shader');
   gl.shaderSource(shader, source);
   gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    const log = gl.getShaderInfoLog(shader) ?? 'Unknown shader compile error';
-    gl.deleteShader(shader);
-    throw new ShaderError(log);
-  }
   return shader;
 };
+
+export class ProgramBuild {
+  private readonly handle: WebGLProgram;
+  private readonly shaders: WebGLShader[];
+
+  constructor(
+    private readonly gl: GL,
+    vertexSource: string,
+    fragmentSource: string,
+  ) {
+    const handle = gl.createProgram();
+    if (!handle) throw new ShaderError('Unable to create program');
+    this.handle = handle;
+    this.shaders = [submit(gl, gl.VERTEX_SHADER, vertexSource), submit(gl, gl.FRAGMENT_SHADER, fragmentSource)];
+    for (const shader of this.shaders) gl.attachShader(handle, shader);
+    gl.linkProgram(handle);
+  }
+
+  isComplete(parallel: ParallelCompile | null): boolean {
+    return parallel === null || Boolean(this.gl.getProgramParameter(this.handle, parallel.COMPLETION_STATUS_KHR));
+  }
+
+  finish(): Program {
+    const { gl, handle, shaders } = this;
+    const linked = Boolean(gl.getProgramParameter(handle, gl.LINK_STATUS));
+    const logs = linked ? [] : [...shaders.map((shader) => gl.getShaderInfoLog(shader)), gl.getProgramInfoLog(handle)];
+    for (const shader of shaders) gl.deleteShader(shader);
+    if (!linked) {
+      gl.deleteProgram(handle);
+      throw new ShaderError(logs.filter(Boolean).join('\n') || 'Unknown shader error');
+    }
+    return new Program(gl, handle);
+  }
+}
 
 export class Program {
   private readonly locations = new Map<string, WebGLUniformLocation | null>();
 
-  private constructor(
+  constructor(
     private readonly gl: GL,
     private readonly handle: WebGLProgram,
   ) {}
 
   static create(gl: GL, vertexSource: string, fragmentSource: string): Program {
-    const handle = gl.createProgram();
-    if (!handle) throw new ShaderError('Unable to create program');
-    const vertex = compile(gl, gl.VERTEX_SHADER, vertexSource);
-    const fragment = compile(gl, gl.FRAGMENT_SHADER, fragmentSource);
-    gl.attachShader(handle, vertex);
-    gl.attachShader(handle, fragment);
-    gl.linkProgram(handle);
-    gl.deleteShader(vertex);
-    gl.deleteShader(fragment);
-    if (!gl.getProgramParameter(handle, gl.LINK_STATUS)) {
-      const log = gl.getProgramInfoLog(handle) ?? 'Unknown program link error';
-      gl.deleteProgram(handle);
-      throw new ShaderError(log);
-    }
-    return new Program(gl, handle);
+    return new ProgramBuild(gl, vertexSource, fragmentSource).finish();
   }
 
   use(): void {

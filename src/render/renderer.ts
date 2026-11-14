@@ -4,7 +4,7 @@ import type { CameraPose } from '../scene/camera';
 import { crystalRotation, crystalShape } from '../scene/crystal';
 import type { Storm } from '../scene/storm';
 import { seededUnit } from '../util/random';
-import { Program, RenderTarget, type TargetFormat } from './gl';
+import { Program, ProgramBuild, RenderTarget, type ParallelCompile, type TargetFormat } from './gl';
 import { sceneView, type SceneView } from './sceneView';
 import { compositeFragment, fullscreenVertex, prepassFragment, sceneFragment } from './shaders';
 
@@ -24,9 +24,19 @@ export interface RendererOptions {
   prepass: boolean;
 }
 
+export interface PipelineSpec {
+  world: number;
+  terrain: number;
+}
+
 interface Pipeline {
   scene: Program;
   prepass: Program | null;
+}
+
+interface PipelineBuild {
+  scene: ProgramBuild;
+  prepass: ProgramBuild | null;
 }
 
 const TAU = Math.PI * 2;
@@ -45,6 +55,8 @@ export class Renderer {
 
   private readonly composite: Program;
   private readonly pipelines = new Map<string, Pipeline>();
+  private readonly builds = new Map<string, PipelineBuild>();
+  private readonly parallel: ParallelCompile | null;
   private readonly sceneTarget: RenderTarget;
   private readonly prepassTarget: RenderTarget | null;
 
@@ -75,26 +87,57 @@ export class Renderer {
         ? new RenderTarget(gl, { internalFormat: gl.R16F, format: gl.RED, type: gl.HALF_FLOAT, filter: gl.NEAREST })
         : null;
 
+    this.parallel = gl.getExtension('KHR_parallel_shader_compile') as ParallelCompile | null;
     this.composite = Program.create(gl, fullscreenVertex, compositeFragment);
     gl.bindVertexArray(gl.createVertexArray());
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.BLEND);
   }
 
-  prepare(settings: Settings): Pipeline {
-    const world = WORLDS[settings.world];
-    const terrain = TERRAIN_IDS[world.usesTerrain ? settings.terrain : 0];
-    const key = `${world.id}/${terrain}`;
-    let pipeline = this.pipelines.get(key);
-    if (!pipeline) {
-      pipeline = {
-        scene: Program.create(this.gl, fullscreenVertex, sceneFragment(world.id, terrain)),
-        prepass: this.prepassTarget
-          ? Program.create(this.gl, fullscreenVertex, prepassFragment(world.id, terrain))
-          : null,
-      };
-      this.pipelines.set(key, pipeline);
-    }
+  get compilesInBackground(): boolean {
+    return this.parallel !== null;
+  }
+
+  request(spec: PipelineSpec): void {
+    const key = this.pipelineKey(spec);
+    if (this.pipelines.has(key) || this.builds.has(key)) return;
+    const world = WORLDS[spec.world];
+    const terrain = TERRAIN_IDS[world.usesTerrain ? spec.terrain : 0];
+    this.builds.set(key, {
+      scene: new ProgramBuild(this.gl, fullscreenVertex, sceneFragment(world.id, terrain)),
+      prepass: this.prepassTarget
+        ? new ProgramBuild(this.gl, fullscreenVertex, prepassFragment(world.id, terrain))
+        : null,
+    });
+  }
+
+  isReady(spec: PipelineSpec): boolean {
+    const key = this.pipelineKey(spec);
+    if (this.pipelines.has(key)) return true;
+    const build = this.builds.get(key);
+    if (!build) return false;
+    if (!build.scene.isComplete(this.parallel) || build.prepass?.isComplete(this.parallel) === false) return false;
+    this.finish(key, build);
+    return true;
+  }
+
+  prepare(spec: PipelineSpec): Pipeline {
+    const key = this.pipelineKey(spec);
+    const ready = this.pipelines.get(key);
+    if (ready) return ready;
+    this.request(spec);
+    return this.finish(key, this.builds.get(key)!);
+  }
+
+  private pipelineKey(spec: PipelineSpec): string {
+    const world = WORLDS[spec.world];
+    return `${world.id}/${TERRAIN_IDS[world.usesTerrain ? spec.terrain : 0]}`;
+  }
+
+  private finish(key: string, build: PipelineBuild): Pipeline {
+    this.builds.delete(key);
+    const pipeline: Pipeline = { scene: build.scene.finish(), prepass: build.prepass?.finish() ?? null };
+    this.pipelines.set(key, pipeline);
     return pipeline;
   }
 
