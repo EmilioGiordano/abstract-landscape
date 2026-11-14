@@ -1,0 +1,16 @@
+uniform vec2 uResolution;
+uniform vec2 uViewOrigin;
+uniform vec2 uViewSize;
+uniform vec3 uOrigin;
+uniform vec3 uForward;
+uniform vec3 uRight;
+uniform vec3 uUp;
+uniform float uLens;
+uniform vec3 uPhase;
+uniform vec3 uSeed;
+uniform mat3 uCrystalRotation;
+uniform vec4 uCrystalShape;
+uniform float uTerrace;
+uniform float uDetail;
+uniform float uFolds;
+uniform float uTime;
