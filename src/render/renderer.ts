@@ -35,6 +35,8 @@ const SEAM_MARGIN_TEXELS = 2;
 const SEED_SPREAD = 40;
 const AURA = styleIndex('aura');
 const CONE_SAFETY = 1.15;
+const NORMAL_TAPS = 4;
+const OCCLUSION_TAPS = 2;
 
 export class Renderer {
   readonly gl: WebGL2RenderingContext;
@@ -142,6 +144,8 @@ export class Renderer {
     program.vec3('uBoltLight', storm.light);
     program.float('uFrame', frame.frameIndex % 997);
     program.int('uPreciseSteps', settings.style === AURA ? 1 : 0);
+    program.int('uNormalTaps', NORMAL_TAPS);
+    program.int('uOcclusionTaps', OCCLUSION_TAPS);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 

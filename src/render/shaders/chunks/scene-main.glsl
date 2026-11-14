@@ -7,6 +7,8 @@ uniform float uStorm;
 uniform float uFlash;
 uniform vec3 uBoltLight;
 uniform float uFrame;
+uniform int uNormalTaps;
+uniform int uOcclusionTaps;
 
 out vec4 fragment;
 
@@ -17,22 +19,31 @@ const int STYLE_CLAY = 2;
 const int STYLE_CONTOUR = 3;
 const int STYLE_AURA = 4;
 
+const vec3 TETRAHEDRON[4] = vec3[4](
+  vec3(1.0, -1.0, -1.0),
+  vec3(-1.0, -1.0, 1.0),
+  vec3(-1.0, 1.0, -1.0),
+  vec3(1.0, 1.0, 1.0)
+);
+const float OCCLUSION_REACH[2] = float[2](0.12, 0.50);
+
 vec3 surfaceNormal(vec3 p, float epsilon) {
-  vec2 k = vec2(1.0, -1.0);
-  return normalize(
-    k.xyy * map(p + k.xyy * epsilon) +
-    k.yyx * map(p + k.yyx * epsilon) +
-    k.yxy * map(p + k.yxy * epsilon) +
-    k.xxx * map(p + k.xxx * epsilon)
-  );
+  vec3 gradient = vec3(0.0);
+  for (int i = 0; i < uNormalTaps; i++) {
+    gradient += TETRAHEDRON[i] * map(p + TETRAHEDRON[i] * epsilon);
+  }
+  return normalize(gradient);
 }
 
 float occlusion(vec3 p, vec3 normal) {
-  float close = clamp(map(p + normal * 0.12) / 0.12, 0.0, 1.0);
-  fineReliefEnabled = false;
-  float wide = clamp(map(p + normal * 0.50) / 0.50, 0.0, 1.0);
+  float shade = 0.0;
+  for (int i = 0; i < uOcclusionTaps; i++) {
+    float reach = OCCLUSION_REACH[i];
+    fineReliefEnabled = i == 0;
+    shade += 0.5 * clamp(map(p + normal * reach) / reach, 0.0, 1.0);
+  }
   fineReliefEnabled = true;
-  return 0.5 * close + 0.5 * wide;
+  return shade;
 }
 
 float clearedDistance() {
