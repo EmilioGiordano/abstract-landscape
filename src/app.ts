@@ -8,12 +8,14 @@ import { AdaptiveScale } from './render/adaptiveScale';
 import { FramePacer } from './render/framePacer';
 import { ShaderError } from './render/gl';
 import { GpuTimer } from './render/gpuTimer';
+import { PipelineWarmup } from './render/pipelineWarmup';
 import { Renderer } from './render/renderer';
 import { poseCamera, type CameraPose } from './scene/camera';
 import { describeScene } from './scene/describe';
 import { Director, type SceneChange } from './scene/director';
 import { Motion } from './scene/motion';
 import { Storm } from './scene/storm';
+import { warmupOrder } from './scene/warmupOrder';
 import { PresetLibrary } from './state/presetLibrary';
 import { applyQueryOverrides, loadSettings, saveSettings } from './state/settings';
 import { createStore, type Store } from './state/storage';
@@ -33,6 +35,7 @@ const MAX_PIXEL_RATIO = 2;
 const MAX_FRAME_SECONDS = 0.1;
 const STATUS_INTERVAL_SECONDS = 0.5;
 const SHADER_KEYS: readonly ParamKey[] = ['world', 'terrain'];
+const WARMUP_DELAY_SECONDS = 1;
 
 export class App implements CaptureTarget {
   readonly canvas: HTMLCanvasElement;
@@ -43,6 +46,7 @@ export class App implements CaptureTarget {
   private readonly renderer: Renderer;
   private readonly timer: GpuTimer;
   private readonly director: Director;
+  private readonly warmup: PipelineWarmup;
   private readonly panel: Panel;
   private readonly hint: Hint;
   private readonly motion = new Motion();
@@ -70,6 +74,7 @@ export class App implements CaptureTarget {
 
     this.renderer = new Renderer(this.canvas, { preserveDrawingBuffer: this.fixedOutput, prepass: options.prepass });
     this.timer = new GpuTimer(this.renderer.gl);
+    this.warmup = new PipelineWarmup(this.renderer, warmupOrder(this.presets));
     this.director = new Director(
       this.settings,
       this.presets,
@@ -161,6 +166,7 @@ export class App implements CaptureTarget {
     this.motion.advance(seconds, this.settings);
     this.storm.update(seconds, this.settings.storm, this.world, () => this.pose());
     this.director.update(seconds);
+    if (this.motion.clock > WARMUP_DELAY_SECONDS) this.warmup.step();
 
     this.timer.begin();
     this.drawFrame();
